@@ -839,6 +839,58 @@ def full_overview_win(
     handle = Info(parent, window, 'Full Overview', top_title, text)
     handle.run()
 
+def search_win(parent: GuiManager, window: curses.window, top_title: str) -> None:
+    handle0 = SingleInput(
+        parent,
+        window,
+        'Search',
+        top_title,
+        'Enter the search term:',
+        True,
+    )
+    search_term = handle0.run()
+    if not search_term:
+        return
+
+    domains = db_get_domains()
+    users = db_get_users()
+    aliases = db_get_aliases()
+    text = 'Search results for term "%s":\n\n' % search_term
+
+    domains = [domain for domain in domains if search_term in domain.name]
+    users = [user for user in users if search_term in user.email]
+    aliases = [alias for alias in aliases if search_term in alias.source or search_term in alias.destination]
+
+    if domains:
+        text += 'Found %d domain(s):\n\n' % len(domains)
+        for domain in domains:
+            text += f'\t{domain.name}\n'
+
+    if users:
+        text += '\nFound %d user(s):\n\n' % len(users)
+        for user in users:
+            text += f'\t{user.email}  --  {format_quota(user.quota)} quota\n'
+
+    if aliases:
+        text += '\nFound %d alias(es):\n\n' % len(aliases)
+        aliases.sort(key=lambda alias: alias.source)
+        prev_source = None
+        for alias in aliases:
+            if any(alias.destination == user.email for user in users):
+                foreign_msg = '  (internal destination email)'
+            else:
+                foreign_msg = '  (foreign destination email)'
+
+            if prev_source == alias.source:
+                text += f'\t  -> {alias.destination}{foreign_msg}\n'
+            else:
+                text += f'\t{alias.source}\n\t  -> {alias.destination}{foreign_msg}\n'
+
+            prev_source = alias.source
+
+    handle1 = Info(parent, window, 'Search Results', top_title, text)
+    handle1.run()
+
 
 def domain_add_win(parent: GuiManager, window: curses.window, top_title: str) -> None:
     handle0 = SingleInput(
@@ -1390,6 +1442,7 @@ class MainApp(GuiManager):
             ('List domains', domain_overview_win),
             ('List everything', full_overview_win),
             ('Add domain', domain_add_win),
+            ('Search for domain/alias/email', search_win),
             ('Manage domain', domain_selection_win),
             ('Save changes', save_changes_win),
             ('Discard changes', discard_changes_win),
