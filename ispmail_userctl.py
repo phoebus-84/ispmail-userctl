@@ -1399,6 +1399,161 @@ def save_changes_win(parent: GuiManager, window: curses.window, top_title: str) 
     if handle.run() == ConfirmResult.OPTB:
         DB_CONNECTION.commit()
 
+def read_blocked_entries() -> list[str]:
+    entries = []
+    try:
+        with open('/etc/postfix/access', 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1] == 'REJECT':
+                        entries.append(parts[0])
+    except FileNotFoundError:
+        pass
+    return entries
+
+def add_blocked_entry(address: str) -> None:
+    with open('/etc/postfix/access', 'a') as f:
+        f.write(f"{address} REJECT\n")
+    os.system("postmap hash:/etc/postfix/access")
+
+def remove_blocked_entry(address: str) -> None:
+    lines = []
+    try:
+        with open('/etc/postfix/access', 'r') as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped and not stripped.startswith('#'):
+                    parts = stripped.split()
+                    if len(parts) >= 2 and parts[1] == 'REJECT' and parts[0] == address:
+                        continue
+                lines.append(line)
+    except FileNotFoundError:
+        return
+    with open('/etc/postfix/access', 'w') as f:
+        f.writelines(lines)
+    os.system("postmap hash:/etc/postfix/access")
+
+def manage_blocked_emails_win(
+    parent: GuiManager,
+    window: curses.window,
+    top_title: str,
+) -> None:
+    menu_items: MenuItemType = [
+        ('List blocked entries', list_blocked_entries_win),
+        ('Add blocked entry', add_blocked_entry_win),
+        ('Remove blocked entry', remove_blocked_entry_win),
+        (f'Return to {top_title}', lambda *args: None),
+    ]
+    handle = Menu(
+        parent,
+        window,
+        'Manage Blocked Emails',
+        top_title,
+        menu_items,
+    )
+    handle.run()
+
+def list_blocked_entries_win(
+    parent: GuiManager,
+    window: curses.window,
+    top_title: str,
+) -> None:
+    entries = read_blocked_entries()
+    text = 'Blocked email addresses/patterns:\n\n'
+    if entries:
+        for entry in entries:
+            text += f'\t{entry}\n'
+    else:
+        text += '\tNo blocked entries found.\n'
+    handle = Info(parent, window, 'Blocked Entries', top_title, text)
+    handle.run()
+
+def add_blocked_entry_win(
+    parent: GuiManager,
+    window: curses.window,
+    top_title: str,
+) -> None:
+    handle0 = SingleInput(
+        parent,
+        window,
+        'Add Blocked Entry',
+        top_title,
+        'Enter the email address or pattern to block (e.g. user@domain.com or domain.com):',
+        True,
+    )
+    address = handle0.run()
+    if address:
+        entries = read_blocked_entries()
+        if address in entries:
+            handle1 = Note(
+                parent,
+                window,
+                'Add Blocked Entry Failed',
+                top_title,
+                f"Entry '{address}' is already blocked.",
+            )
+            handle1.run()
+        else:
+            add_blocked_entry(address)
+            handle1 = Note(
+                parent,
+                window,
+                'Entry Blocked',
+                top_title,
+                f"Entry '{address}' has been blocked.",
+            )
+            handle1.run()
+
+def remove_blocked_entry_win(
+    parent: GuiManager,
+    window: curses.window,
+    top_title: str,
+) -> None:
+    entries = read_blocked_entries()
+    if not entries:
+        handle0 = Note(
+            parent,
+            window,
+            'No Blocked Entries',
+            top_title,
+            'There are no blocked entries to remove.',
+        )
+        handle0.run()
+        return
+
+    handle0 = Select(
+        parent,
+        window,
+        'Select Entry to Unblock',
+        top_title,
+        [(entry, entry) for entry in entries],
+    )
+    selected_entry = handle0.run()
+    if selected_entry:
+        handle1 = Confirm(
+            parent,
+            window,
+            'Confirm Unblock',
+            top_title,
+            f"Do you want to unblock '{selected_entry}'?",
+            'no',
+            'yes',
+        )
+        result = handle1.run()
+        if result == ConfirmResult.OPTB:
+            remove_blocked_entry(selected_entry)
+            handle2 = Note(
+                parent,
+                window,
+                'Entry Unblocked',
+                top_title,
+                f"Entry '{selected_entry}' has been unblocked.",
+            )
+            handle2.run()
+
+
 
 # From https://groups.google.com/forum/#!msg/comp.lang.python/CpUszNNXUQM/QADpl11Z-nAJ
 def getheightwidth() -> tuple[int, int]:
@@ -1444,6 +1599,7 @@ class MainApp(GuiManager):
             ('Add domain', domain_add_win),
             ('Search for domain/alias/email', search_win),
             ('Manage domain', domain_selection_win),
+            ('Manage blocked emails', manage_blocked_emails_win),  # New entry
             ('Save changes', save_changes_win),
             ('Discard changes', discard_changes_win),
         ]
@@ -1559,7 +1715,7 @@ def main() -> None:
 
         ## DEBUG support
         # import sqlite3
-        # DB_CONNECTION = sqlite3.connect("testdb.db")
+        # DB_CONNECTION = sqlite3.connect("newdb.sqlite")
 
         DB_CURSOR = DB_CONNECTION.cursor()
 
